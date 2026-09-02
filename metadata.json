@@ -1,0 +1,6 @@
+{
+  "name": "পুকুর হিসাব",
+  "description": "পুকুর ব্যবস্থাপনা, মাছ চাষ, খাবার, খরচ, বিক্রি ও লাভ-ক্ষতির হিসাব",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

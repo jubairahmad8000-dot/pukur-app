@@ -1,0 +1,50 @@
+{
+  "id": "/",
+  "name": "পুকুর হিসাব",
+  "short_name": "পুকুর হিসাব",
+  "description": "পুকুর ব্যবস্থাপনা, মাছ চাষ, খাবার, খরচ, বিক্রি ও লাভ-ক্ষতির হিসাব",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#047857",
+  "background_color": "#047857",
+  "lang": "bn",
+  "dir": "ltr",
+  "categories": ["finance", "business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot.png",
+      "sizes": "540x960",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "পুকুর হিসাব ড্যাশবোর্ড"
+    }
+  ]
+}

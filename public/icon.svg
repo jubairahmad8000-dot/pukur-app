@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#064e3b" />
+    </linearGradient>
+    <linearGradient id="fishGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGrad)" />
+
+  <!-- Water Ripple Rings -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#10b981" stroke-width="6" opacity="0.25" />
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#34d399" stroke-width="7" opacity="0.35" />
+  <circle cx="256" cy="256" r="85" fill="none" stroke="#6ee7b7" stroke-width="6" opacity="0.45" />
+
+  <!-- Stylized Fish Icon in Center -->
+  <g transform="translate(256, 240)">
+    <!-- Main fish body & tail -->
+    <path d="M-90,-15 C-40,-75 60,-55 100,0 C60,55 -40,75 -90,15 C-125,50 -130,-50 -90,-15 Z" fill="#ffffff" />
+    
+    <!-- Tail fin detail -->
+    <path d="M-85,0 L-130,-45 C-115,-10 -115,10 -130,45 Z" fill="url(#fishGrad)" />
+
+    <!-- Dorsal Fin -->
+    <path d="M-10,-55 C20,-80 55,-65 65,-45 C35,-45 10,-40 -10,-55 Z" fill="url(#fishGrad)" />
+
+    <!-- Eye -->
+    <circle cx="55" cy="-8" r="8" fill="#064e3b" />
+    <circle cx="57" cy="-10" r="3" fill="#ffffff" />
+
+    <!-- Gill Curve -->
+    <path d="M25,-25 C35,-5 35,5 25,25" fill="none" stroke="url(#fishGrad)" stroke-width="5" stroke-linecap="round" />
+
+    <!-- Small Golden Scale Accent -->
+    <path d="M-5,-5 C5,-15 15,-15 25,-5" fill="none" stroke="url(#accentGrad)" stroke-width="4" stroke-linecap="round" />
+    <path d="M-20,10 C-10,0 0,0 10,10" fill="none" stroke="url(#accentGrad)" stroke-width="4" stroke-linecap="round" />
+  </g>
+
+  <!-- Waves at bottom -->
+  <path d="M96,380 C150,360 190,400 256,380 C322,360 362,400 416,380" fill="none" stroke="#6ee7b7" stroke-width="12" stroke-linecap="round" opacity="0.8" />
+  <path d="M130,415 C170,400 210,430 256,415 C302,400 342,430 382,415" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round" opacity="0.6" />
+</svg>
