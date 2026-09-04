@@ -13,6 +13,27 @@ import {
   saveStoredMembers,
   getTodayDateStr,
 } from './utils/storage';
+import {
+  GoogleUser,
+  SyncState,
+  getStoredGoogleUser,
+  getStoredSpreadsheetUrl,
+  getLastSyncTime,
+  isAutoSyncEnabled,
+  setAutoSyncEnabled,
+  requestGoogleSignIn,
+  signOutGoogle,
+  syncAllDataToGoogleSheets,
+  restoreDataFromGoogleSheets,
+  isInsufficientScopeError,
+  getOrCreateSpreadsheet,
+} from './services/googleSheetsService';
+import { initAuth } from './services/firebaseAuth';
+import {
+  hasPasswordConfigured,
+  isSessionUnlocked,
+  setSessionUnlocked,
+} from './utils/security';
 import { Header, ActiveTab } from './components/Header';
 import { DashboardStats } from './components/DashboardStats';
 import { PondListSection } from './components/PondListSection';
@@ -28,7 +49,9 @@ import { MemberFormModal } from './components/MemberFormModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { Plus, CheckCircle2, ShieldCheck, Database, Smartphone } from 'lucide-react';
+import { GoogleSyncModal } from './components/GoogleSyncModal';
+import { PasscodeLockModal } from './components/PasscodeLockModal';
+import { Plus, CheckCircle2, ShieldCheck, Database, Smartphone, FileSpreadsheet, RefreshCw, ExternalLink } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('ponds');
@@ -37,6 +60,20 @@ export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+
+  // গুগল একাউন্ট ও শিট সিঙ্ক স্টেট
+  const [googleUser, setGoogleUser] = useState<GoogleUser | null>(() => getStoredGoogleUser());
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => getLastSyncTime());
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => getStoredSpreadsheetUrl());
+  const [isAutoSync, setIsAutoSync] = useState<boolean>(() => isAutoSyncEnabled());
+  const [hasScopeIssue, setHasScopeIssue] = useState<boolean>(false);
+
+  // অ্যাপ পাসওয়ার্ড ও নিরাপত্তা লক স্টেট
+  const [isLocked, setIsLocked] = useState<boolean>(() => hasPasswordConfigured() && !isSessionUnlocked());
+  const [hasPassword, setHasPassword] = useState<boolean>(() => hasPasswordConfigured());
 
   // PWA / APK ইনস্টল মোডাল স্টেট
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
@@ -85,6 +122,26 @@ export default function App() {
     setExpenses(loadedExpenses);
     setSales(loadedSales);
     setMembers(loadedMembers);
+
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGoogleUser({
+          id: user.uid,
+          name: user.displayName || 'পুকুর হিসাব ব্যবহারকারী',
+          email: user.email || '',
+          picture: user.photoURL || '',
+          accessToken: token,
+          expiresAt: Date.now() + 3600 * 1000,
+        });
+      },
+      () => {
+        // user signed out or token invalidated
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // টোস্ট মেসেজ প্রদর্শন
@@ -435,6 +492,227 @@ export default function App() {
     totalInvestment,
   };
 
+  // ডাটা পরিবর্তনে অটো-সিঙ্ক (Debounced Auto-Sync to Google Sheets)
+  useEffect(() => {
+    if (!googleUser || !isAutoSync || isLocked) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSyncing(true);
+        const res = await syncAllDataToGoogleSheets(
+          googleUser.accessToken,
+          ponds,
+          feedLogs,
+          expenses,
+          sales,
+          members,
+          stats
+        );
+        setSpreadsheetUrl(res.spreadsheetUrl);
+        setLastSyncTime(res.timestamp);
+        setSyncState('synced');
+        setHasScopeIssue(false);
+      } catch (err: any) {
+        console.warn('Auto sync warning:', err);
+        setSyncState('error');
+        if (isInsufficientScopeError(err)) {
+          setHasScopeIssue(true);
+        }
+      } finally {
+        setIsSyncing(false);
+      }
+    }, 2200);
+
+    return () => clearTimeout(timer);
+  }, [ponds, feedLogs, expenses, sales, members, googleUser, isAutoSync, isLocked]);
+
+  // ====================== গুগল লগইন ও সিঙ্ক হ্যান্ডলার ======================
+  const handleGoogleSignIn = async (forceConsent: boolean = true) => {
+    try {
+      setIsSyncing(true);
+      const user = await requestGoogleSignIn(forceConsent);
+      setGoogleUser(user);
+      setHasScopeIssue(false);
+      showToast(`স্বাগতম! ${user.name} (${user.email || 'Gmail'}) দিয়ে লগইন সফল হয়েছে`);
+
+      // লগইনের সাথে সাথে প্রাথমিক ব্যাকআপ
+      const res = await syncAllDataToGoogleSheets(
+        user.accessToken,
+        ponds,
+        feedLogs,
+        expenses,
+        sales,
+        members,
+        stats
+      );
+      setSpreadsheetUrl(res.spreadsheetUrl);
+      setLastSyncTime(res.timestamp);
+      setSyncState('synced');
+      setHasScopeIssue(false);
+      showToast('সব তথ্য স্বয়ংক্রিয়ভাবে আপনার গুগল শীটে ব্যাকআপ হয়েছে!');
+    } catch (err: any) {
+      if (isInsufficientScopeError(err)) {
+        setHasScopeIssue(true);
+        showToast('গুগল ড্রাইভ ও শীট ব্যবহারের পারমিশন অনুমোদন প্রয়োজন।');
+      } else {
+        showToast(`গুগল লগইন ত্রুটি: ${err?.message || 'লগইন সম্পন্ন করা যায়নি'}`);
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleGoogleSignOut = () => {
+    signOutGoogle();
+    setGoogleUser(null);
+    setSpreadsheetUrl(null);
+    setLastSyncTime(null);
+    setSyncState('idle');
+    setHasScopeIssue(false);
+    showToast('গুগল অ্যাকাউন্ট থেকে লগআউট করা হয়েছে।');
+  };
+
+  const handleManualSync = async () => {
+    if (!googleUser) {
+      setIsSyncModalOpen(true);
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      const res = await syncAllDataToGoogleSheets(
+        googleUser.accessToken,
+        ponds,
+        feedLogs,
+        expenses,
+        sales,
+        members,
+        stats
+      );
+      setSpreadsheetUrl(res.spreadsheetUrl);
+      setLastSyncTime(res.timestamp);
+      setSyncState('synced');
+      setHasScopeIssue(false);
+      showToast('গুগল শীটে সমস্ত হিসাব সফলভাবে সংরক্ষিত হয়েছে!');
+    } catch (err: any) {
+      if (isInsufficientScopeError(err)) {
+        setHasScopeIssue(true);
+        showToast('গুগল পারমিশন নবায়ন করতে অনুমোদন উইন্ডো খোলা হচ্ছে...');
+        try {
+          const reauthUser = await requestGoogleSignIn(true);
+          setGoogleUser(reauthUser);
+          setHasScopeIssue(false);
+          const retryRes = await syncAllDataToGoogleSheets(
+            reauthUser.accessToken,
+            ponds,
+            feedLogs,
+            expenses,
+            sales,
+            members,
+            stats
+          );
+          setSpreadsheetUrl(retryRes.spreadsheetUrl);
+          setLastSyncTime(retryRes.timestamp);
+          setSyncState('synced');
+          showToast('পারমিশন অনুমোদন সফল এবং গুগল শীটে তথ্য সংরক্ষিত হয়েছে!');
+          return;
+        } catch (reauthErr: any) {
+          showToast(`অনুমোদন ব্যর্থ: ${reauthErr?.message || 'পারমিশন পাওয়া যায়নি'}`);
+          setSyncState('error');
+          setIsSyncModalOpen(true);
+          return;
+        }
+      }
+      showToast(`সিঙ্ক ব্যর্থ: ${err?.message || 'সমস্যা হয়েছে'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleRestoreFromSheets = async () => {
+    if (!googleUser) return;
+    let sheetId = localStorage.getItem('pukur_hisab_spreadsheet_id_v1');
+    try {
+      setIsSyncing(true);
+      if (!sheetId) {
+        const found = await getOrCreateSpreadsheet(googleUser.accessToken);
+        sheetId = found.id;
+      }
+      if (!sheetId) {
+        showToast('কোনো পূর্ববর্তী গুগল শীট পাওয়া যায়নি!');
+        return;
+      }
+
+      const restored = await restoreDataFromGoogleSheets(googleUser.accessToken, sheetId);
+      if (restored.ponds.length > 0) {
+        setPonds(restored.ponds);
+        saveStoredPonds(restored.ponds);
+      }
+      setFeedLogs(restored.feedLogs);
+      saveStoredFeedLogs(restored.feedLogs);
+      setExpenses(restored.expenses);
+      saveStoredExpenses(restored.expenses);
+      setSales(restored.sales);
+      saveStoredSales(restored.sales);
+      setMembers(restored.members);
+      saveStoredMembers(restored.members);
+      setHasScopeIssue(false);
+      showToast('গুগল শীট থেকে সমস্ত ডাটা ফোনে সফলভাবে ফিরিয়ে আনা হয়েছে!');
+    } catch (err: any) {
+      if (isInsufficientScopeError(err)) {
+        setHasScopeIssue(true);
+        showToast('শীট পড়ার জন্য পারমিশন অনুমোদন উইন্ডো খোলা হচ্ছে...');
+        try {
+          const reauthUser = await requestGoogleSignIn(true);
+          setGoogleUser(reauthUser);
+          setHasScopeIssue(false);
+          const found = await getOrCreateSpreadsheet(reauthUser.accessToken);
+          if (found.id) {
+            const retryRestored = await restoreDataFromGoogleSheets(reauthUser.accessToken, found.id);
+            if (retryRestored.ponds.length > 0) {
+              setPonds(retryRestored.ponds);
+              saveStoredPonds(retryRestored.ponds);
+            }
+            setFeedLogs(retryRestored.feedLogs);
+            saveStoredFeedLogs(retryRestored.feedLogs);
+            setExpenses(retryRestored.expenses);
+            saveStoredExpenses(retryRestored.expenses);
+            setSales(retryRestored.sales);
+            saveStoredSales(retryRestored.sales);
+            setMembers(retryRestored.members);
+            saveStoredMembers(retryRestored.members);
+            showToast('অনুমোদন সফল এবং গুগল শীট থেকে সমস্ত ডাটা রিস্টোর করা হয়েছে!');
+            return;
+          }
+        } catch (reauthErr: any) {
+          showToast(`রিস্টোর ব্যর্থ: ${reauthErr?.message || 'অনুমোদন দেওয়া হয়নি'}`);
+          return;
+        }
+      }
+      showToast(`ডাটা রিস্টোর ব্যর্থ: ${err?.message || 'সমস্যা হয়েছে'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleToggleAutoSync = (enabled: boolean) => {
+    setIsAutoSync(enabled);
+    setAutoSyncEnabled(enabled);
+    showToast(enabled ? 'স্বয়ংক্রিয় সিঙ্ক চালু করা হয়েছে।' : 'স্বয়ংক্রিয় সিঙ্ক বন্ধ করা হয়েছে।');
+  };
+
+  const handleUnlockApp = () => {
+    setSessionUnlocked(true);
+    setIsLocked(false);
+    showToast('পুকুর হিসাব আনলক হয়েছে!');
+  };
+
+  const handleLockAppNow = () => {
+    setSessionUnlocked(false);
+    setIsLocked(true);
+    setIsSyncModalOpen(false);
+    showToast('পাসওয়ার্ড দিয়ে অ্যাপ লক করা হয়েছে।');
+  };
+
   // হেডার বা ফ্লোটিং অ্যাকশন
   const handleHeaderAction = () => {
     switch (activeTab) {
@@ -458,13 +736,95 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-      {/* ১. শীর্ষ হেডার ও ৪-ট্যাব নেভিগেশন */}
+      {/* ১. শীর্ষ হেডার ও নেভিগেশন */}
       <Header
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
         onOpenAddModal={handleHeaderAction}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        googleUser={googleUser}
+        onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        isSyncing={isSyncing}
+        hasPasswordProtection={hasPassword}
+        onLockApp={handleLockAppNow}
       />
+
+      {/* গুগল শীট সিঙ্ক ব্যানার ও স্ট্যাটাস বার */}
+      {hasScopeIssue ? (
+        <div className="bg-amber-600 text-white border-b border-amber-700 px-4 py-2 text-xs shadow-xs">
+          <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-200 animate-ping shrink-0"></span>
+              <span>
+                <strong>গুগল ড্রাইভ ও শীটের অনুমতি প্রয়োজন:</strong> আপনার লগইনে ফাইল তৈরি করার পূর্ণ পারমিশন নেই।
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => handleGoogleSignIn(true)}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1 bg-white text-amber-900 hover:bg-amber-50 px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer shadow-xs"
+              >
+                <span>{isSyncing ? 'অনুমোদন হচ্ছে...' : 'অনুমোদন দিন (Re-authorize)'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : googleUser ? (
+        <div className="bg-emerald-900 text-white border-b border-emerald-700/70 px-4 py-2 text-xs">
+          <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+              <span className="truncate">
+                গুগল শীটে স্বয়ংক্রিয় সংরক্ষণ: <strong>{googleUser.email || googleUser.name}</strong>
+              </span>
+              {lastSyncTime && (
+                <span className="text-emerald-300 hidden md:inline text-[11px]">
+                  • শেষ সিঙ্ক: {lastSyncTime}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {spreadsheetUrl && (
+                <a
+                  href={spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 bg-emerald-700/80 hover:bg-emerald-600 text-white px-2 py-1 rounded text-[11px] font-semibold transition-colors shadow-xs"
+                >
+                  <span>গুগল শীট খুলুন</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <button
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                className="inline-flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white px-2 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'সিঙ্ক হচ্ছে...' : 'এখনই সিঙ্ক'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-emerald-50 border-b border-emerald-200/80 px-4 py-2 text-xs">
+          <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-2 text-emerald-950">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span>
+                <strong>ডাটা ক্লাউডে সুরক্ষিত রাখতে Gmail দিয়ে লগইন করুন</strong> — সমস্ত হিসাব স্বয়ংক্রিয়ভাবে গুগল শীটে জমা থাকবে।
+              </span>
+            </div>
+            <button
+              onClick={() => setIsSyncModalOpen(true)}
+              className="inline-flex items-center gap-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-3 py-1 rounded-md text-xs transition-colors cursor-pointer shadow-xs"
+            >
+              <span>গুগল সিঙ্ক সেটআপ</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* মূল কন্টেইনার */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-5 sm:px-6">
@@ -670,10 +1030,40 @@ export default function App() {
         onClose={() => setIsInstallModalOpen(false)}
       />
 
-      {/* ১১. অফলাইন স্টেট সূচক */}
+      {/* ১১. গুগল একাউন্ট ও গুগল শীট সিঙ্ক মোডাল */}
+      <GoogleSyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => {
+          setIsSyncModalOpen(false);
+          setHasPassword(hasPasswordConfigured());
+        }}
+        googleUser={googleUser}
+        onSignIn={handleGoogleSignIn}
+        onSignOut={handleGoogleSignOut}
+        onManualSync={handleManualSync}
+        onRestoreFromSheets={handleRestoreFromSheets}
+        isSyncing={isSyncing}
+        syncState={syncState}
+        lastSyncTime={lastSyncTime}
+        spreadsheetUrl={spreadsheetUrl}
+        isAutoSync={isAutoSync}
+        onToggleAutoSync={handleToggleAutoSync}
+        onLockAppNow={handleLockAppNow}
+        hasScopeIssue={hasScopeIssue}
+        onReauthorize={() => handleGoogleSignIn(true)}
+      />
+
+      {/* ১২. পাসওয়ার্ড লক স্ক্রিন মোডাল */}
+      <PasscodeLockModal
+        isLocked={isLocked}
+        onUnlock={handleUnlockApp}
+        googleUser={googleUser}
+      />
+
+      {/* ১৩. অফলাইন স্টেট সূচক */}
       <OfflineIndicator />
 
-      {/* ১২. টোস্ট নোটিফিকেশন */}
+      {/* ১৪. টোস্ট নোটিফিকেশন */}
       {toastMessage && (
         <div
           id="toast-notification"

@@ -10,6 +10,8 @@ export interface Pond {
   acquisitionDate: string;  // পুকুর নেওয়ার তারিখ
   notes?: string;           // মন্তব্য
   createdAt: string;        // তৈরির তারিখ
+  userEmail?: string;       // মালিকের জিমেইল
+  userId?: string;          // ইউজার আইডি
 }
 
 export type FeedUnit = 'কেজি' | 'বস্তা' | 'গ্রাম';
